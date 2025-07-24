@@ -1,0 +1,1 @@
+forest_fire <- read.csv("data/forestfires.csv")
