@@ -10,17 +10,26 @@ forest <- read.csv("data/ForestFire.csv")
 str(forest)
 summary(forest)
 
+# Check distribution of burned area
+hist(forest$area, breaks = 50, main = "Distribution of Burned Area", xlab = "Area")
+
+# We can see that most are close to zero but some are huge surpassing 1000 area
+# use log_area instead cuz most forest fire are small but some are huge which make it skew
+# toward the right
+forest$log_area <- log1p(forest$area)
+model <- lm(log_area ~ ., data = forest %>% select(-area))
+
+hist(forest$log_area, 
+     breaks = 50, 
+     main = "Distribution of Burned Area (Log Transformed)", 
+     xlab = "log(1 + Area)")
+
 # Cleanup dataset. Are there any outliers ? Are there any missing values in any of the features ?
 # Explain how you handle categorial features in the dataset.
 # Check for missing values
 colSums(is.na(forest))
 
 # remove outliers with cook distance
-# use log_area instead cuz most forest fire are small but some are huge which make it skew
-# toward the right
-forest$log_area <- log1p(forest$area)
-model <- lm(log_area ~ ., data = forest %>% select(-area))
-
 # Calculate cook distance
 cooksd <- cooks.distance(model)
 
@@ -49,6 +58,7 @@ forest_clean$month <- factor(forest_clean$month,
 forest_clean$day <- factor(forest_clean$day, 
                      levels = c("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
 
+str(forest_clean)
 # Apply appropriate transformations of the features and/or output.
 trainTestSplit = function(data, seed, trainRatio = 0.8){
   set.seed(seed)
@@ -90,19 +100,34 @@ coef(lasso.model)
 # The DMC value and temp are also picked through the lasso model
 coef(elastic.model)
 # Elastic model select the same predictor as lasso meaning that they are important across models
-
 # These results suggest that fire seasonality (December and September, etc) 
 # and dryness indicators (DMC) 
 # play key roles in explaining fire area variation
 
-# For the classification task, report appropriate metrics on the testing dataset based on the 
-# context of each dataset
+# Cross validation
+# Prepare test data
+x_test <- model.matrix(log_area ~ . - area, data = fire.test)[, -1]
+y_test <- fire.test$log_area
 
+# Predictions
+y_pred <- predict(lasso.model, s = cv.lasso$lambda.min, newx = x_test)
+
+# Evaluation
+rmse <- sqrt(mean((y_test - y_pred)^2))
+mae <- mean(abs(y_test - y_pred))
+r2 <- 1 - sum((y_test - y_pred)^2) / sum((y_test - mean(y_test))^2)
+
+cat("RMSE:", rmse, "\n")
+cat("MAE:", mae, "\n")
+cat("R²:", r2, "\n")
+
+# Classification task
 # We should use Recall score as classification metric because:
 # we want to focus on avoiding false negative cases when we predict that 
 # there is no fire but a fire occur
-forest_clean$target <- ifelse(forest_clean$area > 0.5, 1, 0)
+forest_clean$target <- ifelse(forest_clean$area > 0, 1, 0)
 
+# Split train 80%, test 20%
 fire.split <- trainTestSplit(forest_clean, seed = 0, trainRatio = 0.8)
 fire.train <- fire.split$train
 fire.test <- fire.split$test
@@ -122,8 +147,11 @@ TP = sum((test.label == target) & (test.label == 1))
 FN = sum((test.label != target) & (test.label == 0))
 recall_score = TP / (TP + FN)
 recall_score
-# the recall score is 0.9811321 which means that our model is good at identifying positive cases
-# while avoiding cases where we will miss a fire
+# the recall score is 1
+# This means this model can correctly detect burned areas while avoiding cases where it burn
+# and we say it is not
+# Of course there might be a lot of true negative cases meaning that we deploy the troops for nothing
+# We might need precision score as well
 
 # Final models
 # Regression model we use the lasso one since we compare it with elastic and the features
@@ -132,6 +160,6 @@ recall_score
 # This will help us predict the burned area
 lasso.model
 
-# Classification model with a high recall score of "0.9811321" can help us predict if a fire happen
-# or not well enough
+# Classification model with a perfect recall score of "1" 
+# can help us predict if a fire happen or not while avoiding false negative cases well
 fire.logit
